@@ -1,87 +1,70 @@
 #!/usr/bin/env python
 
-# TODO check range is ok
+# TODO metrics!!!
+# TODO when we have metrics stop the run if there is no new data since the last run
 
 from pySIR.pySIR import pySIR
 
 import sys
 import json
-import random
 
+import shlex
+import subprocess
+import os
+import time
+import datetime
 
+import logging
+logger = logging.getLogger('fib_optimizer')
+
+log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+logging.basicConfig(level=logging.DEBUG, format=log_format)
+
+'''
 def _split_tables(s):
-    lem = set()
-    lpm = set()
+    lem = list()
+    lpm = list()
 
     for p in s:
         if p.split('/')[1] == '24':
-            lem.add(p)
+            lem.append(p)
         else:
-            lpm.add(p)
+            lpm.append(p)
     return lem, lpm
 
 
-def get_variables():
-    v = sir.get_variables_by_category_and_name('apps', 'fib_optimizer').result[0]
-    return json.loads(v['content'])
+def get_bgp_prefix_lists():
+    bgp_p = sir.get_bgp_prefixes(date=end_time).result
+    p = list()
 
+    for router, prefix_list in bgp_p.iteritems():
+        for prefix in prefix_list:
+                p.append(prefix)
 
-def get_date_range():
-    # These are dates for which we have flows. We want to "calculate" the range we want to use
-    # to calculate the topN prefixes
-    dates = sir.get_available_dates().result
-
-    if len(dates) < conf['age']:
-        sd = dates[0]
-    else:
-        sd = dates[-conf['age']]
-    ed = dates[-1]
-    return sd, ed
+    return _split_tables(p)
 
 
 def inc_exc_prefixes():
-
     i_lem, i_lpm = _split_tables(conf['include_prefixes'])
     e_lem, e_lpm = _split_tables(conf['exclude_prefixes'])
 
     return i_lem, i_lpm, e_lem, e_lpm
 
 
-def get_top_prefixes():
-    limit_lem = int(conf['max_lem_prefixes']) - len(inc_lem) + len(exc_lem)
-    lem = set([p['key'] for p in sir.get_top_prefixes(
-            start_time=start_time,
-            end_time=end_time,
-            limit_prefixes=limit_lem,
-            net_masks=conf['lem_prefixes'],
-        ).result]) - exc_lem | inc_lem
-    limit_lpm = int(conf['max_lpm_prefixes']) - len(inc_lpm) + len(exc_lpm)
-    lpm = set([p['key'] for p in sir.get_top_prefixes(
-            start_time=start_time,
-            end_time=end_time,
-            limit_prefixes=limit_lpm,
-            net_masks=conf['lem_prefixes'],
-            exclude_net_masks=1,
-        ).result]) - exc_lpm | inc_lpm
-    return lem, lpm
-
-
-def get_bgp_prefix_lists():
-    bgp_p = sir.get_bgp_prefixes(date=end_time).result
-    p = set()
-
-    for p_data in bgp_p.values():
-        p = p | set(p_data.keys())
-
-    return _split_tables(p)
-
-
 def complete_prefix_list():
     def _complete_pl(pl, bgp_pl, num):
         if len(pl) < num:
             num = num - len(pl)
-            bgp_pl = bgp_pl - pl
-            return pl | set(random.sample(bgp_pl, num))
+
+            for prefix in bgp_pl:
+                if prefix not in pl:
+                    pl.append(prefix)
+                    num -= 1
+
+                    if num == 0:
+                        break
+
+            return pl
         else:
             return pl
 
@@ -89,40 +72,148 @@ def complete_prefix_list():
     lpm_pl = _complete_pl(lpm_prefixes, bgp_lpm, conf['max_lpm_prefixes'])
     return lem_pl, lpm_pl
 
+'''
+def get_variables():
+    logger.debug('Getting variables from SIR')
+    v = sir.get_variables_by_category_and_name('apps', 'fib_optimizer').result[0]
+    logger.debug('Configuration: {}'.format(json.loads(v['content'])))
+    return json.loads(v['content'])
+
+
+def get_date_range():
+    # These are dates for which we have flows. We want to "calculate" the range we want to use
+    # to calculate the topN prefixes
+
+    logger.debug('Getting available dates')
+    dates = sir.get_available_dates().result
+
+    if len(dates) < conf['age']:
+        sd = dates[0]
+    else:
+        sd = dates[-conf['age']]
+    ed = dates[-1]
+
+    logger.debug("Date range: {} - {}".format(sd, ed))
+
+    time_delta = datetime.datetime.now() - datetime.datetime.strptime(ed, '%Y-%m-%dT%H:%M:%S')
+
+    if time_delta.days > 2:
+        msg = 'Data is more than 48 hours old: {}'.format(ed)
+        logger.error(msg)
+        raise Exception(msg)
+
+    return sd, ed
+
+
+def get_top_prefixes():
+    logger.debug('Getting top prefixes')
+    # limit_lem = int(conf['max_lem_prefixes']) - len(inc_lem) + len(exc_lem)
+    limit_lem = int(conf['max_lem_prefixes'])
+    lem = [p['key'] for p in sir.get_top_prefixes(
+            start_time=start_time,
+            end_time=end_time,
+            limit_prefixes=limit_lem,
+            net_masks=conf['lem_prefixes'],
+        ).result]
+
+    # limit_lpm = int(conf['max_lpm_prefixes']) - len(inc_lpm) + len(exc_lpm)
+    limit_lpm = int(conf['max_lpm_prefixes'])
+    lpm = [p['key'] for p in sir.get_top_prefixes(
+            start_time=start_time,
+            end_time=end_time,
+            limit_prefixes=limit_lpm,
+            net_masks=conf['lem_prefixes'],
+            exclude_net_masks=1,
+        ).result]
+    return lem, lpm
+
 
 def build_prefix_lists():
-    def _build_pl(name, prefixes):
-        pl = 'ip prefix-list {}\n'.format(name)
+    logger.debug('Storing prefix lists in disk')
 
-        i = 1
-        for p in prefixes:
-            pl += '   seq {} permit {}\n'.format(i, p)
-            i += 1
+    def _build_pl(name, prefixes):
+        pl = ''
+        for s, p in prefixes.iteritems():
+            pl += '{} permit {}\n'.format(s, p)
 
         with open('{}/{}'.format(conf['path'], name), "w") as f:
             f.write(pl)
 
     _build_pl('fib_optimizer_lpm', lpm_prefixes)
+    _build_pl('fib_optimizer_lem', lem_prefixes)
 
-    lem_p = list(lem_prefixes)
 
-    i = 1
-    while 50000*i <= len(lem_prefixes):
-        num = min(50000*i, len(lem_p))
-        _build_pl('fib_optimizer_lem_{}'.format(i), lem_p[50000*(i-1):num])
-        i += 1
+def install_prefix_lists():
+    logger.debug('Installing the prefix-lists in the system')
 
+    cli_lpm = shlex.split('printf "conf t\n ip prefix-list fib_optimizer_lpm file:{}/fib_optimizer_lpm"'.format(conf['path']))
+    cli_lem = shlex.split('printf "conf t\n ip prefix-list fib_optimizer_lem file:{}/fib_optimizer_lem"'.format(conf['path']))
+    cli = shlex.split('sudo ip netns exec default FastCli -p 15 -A')
+
+    p_lpm = subprocess.Popen(cli_lpm, stdout=subprocess.PIPE)
+    p_cli = subprocess.Popen(cli, stdin=p_lpm.stdout, stdout=subprocess.PIPE)
+
+    time.sleep(30)
+
+    p_lem = subprocess.Popen(cli_lem, stdout=subprocess.PIPE)
+    p_cli = subprocess.Popen(cli, stdin=p_lem.stdout, stdout=subprocess.PIPE)
+
+
+def merge_pl():
+    logger.debug('Merging new prefix-list with existing ones')
+
+    def _merge_pl(pl, pl_file, max_p):
+        if os.path.isfile(pl_file):
+            logger.debug('Prefix list {} already exists. Merging'.format(pl_file))
+            with open(pl_file, 'r') as f:
+                original_pl = dict()
+                for line in f.readlines():
+                    seq, permit, prefix = line.split(' ')
+                    original_pl[prefix.rstrip()] = int(seq)
+
+            if len(original_pl)*0.75 > len(pl):
+                msg = 'New prefix list ({}) is more than 25\% smaller than the new one ({})'.format(len(original_pl), len(pl))
+                logger.error(msg)
+                raise Exception(msg)
+
+            new_prefixes = set(pl) - set(original_pl.keys())
+            existing_prefixes = set(pl) & set(original_pl.keys())
+
+            new_pl = dict()
+            for p in existing_prefixes:
+                new_pl[original_pl[p]] = p
+
+            empty_pos = sorted(list(set(xrange(1, int(max_p)+1)) - set(original_pl.values())))
+            for p in new_prefixes:
+                new_pl[empty_pos.pop(0)] = p
+
+            return new_pl
+        else:
+            logger.debug('Prefix list {} does not exist'.format(pl_file))
+            i = 1
+            new = dict()
+            for p in pl:
+                new[i] = p
+                i += 1
+            return new
+
+    lem = _merge_pl(lem_prefixes, '{}/fib_optimizer_lem'.format(conf['path']), conf['max_lem_prefixes'])
+    lpm = _merge_pl(lpm_prefixes, '{}/fib_optimizer_lpm'.format(conf['path']), conf['max_lpm_prefixes'])
+
+    return lem, lpm
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print 'You have to specify the base URL. For example: {} http://127.0.0.1:5000/api/v1.0'.format(sys.argv[0])
+        print 'You have to specify the base URL. For example: {} http://127.0.0.1:5000'.format(sys.argv[0])
         sys.exit(0)
     elif sys.argv[1] == '-h' or sys.argv[1] == '--help':
-        print 'You have to specify the base URL. For example: {} http://127.0.0.1:5000/api/v1.0'.format(sys.argv[0])
+        print 'You have to specify the base URL. For example: {} http://127.0.0.1:5000'.format(sys.argv[0])
         sys.exit(1)
 
-    sir = pySIR(sys.argv[1])
+    logger.info('Starting fib_optimizer')
+
+    sir = pySIR(sys.argv[1], verify_ssl=False)
 
     # We get the configuration for our application
     conf = get_variables()
@@ -130,17 +221,13 @@ if __name__ == "__main__":
     # The time range we want to process
     start_time, end_time = get_date_range()
 
-    # We get the full BGP table availabe
-    bgp_lem, bgp_lpm = get_bgp_prefix_lists()
-
-    # "static" data
-    inc_lem, inc_lpm, exc_lem, exc_lpm = inc_exc_prefixes()
-
     # We get the Top prefixes. Included and excluded prefixes are merged as well
     lem_prefixes, lpm_prefixes = get_top_prefixes()
 
-    # If we have space left in the LEM/LPM we add some BGP prefixes
-    lem_prefixes, lpm_prefixes = complete_prefix_list()
+    # If the prefix list exists already we merge the data
+    lem_prefixes, lpm_prefixes = merge_pl()
 
     # We build the files with the prefix lists
     build_prefix_lists()
+    install_prefix_lists()
+    logger.info('End fib_optimizer')
