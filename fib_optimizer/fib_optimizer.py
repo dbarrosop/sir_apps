@@ -114,6 +114,7 @@ def get_top_prefixes():
             end_time=end_time,
             limit_prefixes=limit_lem,
             net_masks=conf['lem_prefixes'],
+            filter_proto=4,
         ).result]
 
     # limit_lpm = int(conf['max_lpm_prefixes']) - len(inc_lpm) + len(exc_lpm)
@@ -123,6 +124,7 @@ def get_top_prefixes():
             end_time=end_time,
             limit_prefixes=limit_lpm,
             net_masks=conf['lem_prefixes'],
+            filter_proto=4,
             exclude_net_masks=1,
         ).result]
     return lem, lpm
@@ -139,15 +141,15 @@ def build_prefix_lists():
         with open('{}/{}'.format(conf['path'], name), "w") as f:
             f.write(pl)
 
-    _build_pl('fib_optimizer_lpm', lpm_prefixes)
-    _build_pl('fib_optimizer_lem', lem_prefixes)
+    _build_pl('fib_optimizer_lpm_v4', lpm_prefixes)
+    _build_pl('fib_optimizer_lem_v4', lem_prefixes)
 
 
 def install_prefix_lists():
     logger.debug('Installing the prefix-lists in the system')
 
-    cli_lpm = shlex.split('printf "conf t\n ip prefix-list fib_optimizer_lpm file:{}/fib_optimizer_lpm"'.format(conf['path']))
-    cli_lem = shlex.split('printf "conf t\n ip prefix-list fib_optimizer_lem file:{}/fib_optimizer_lem"'.format(conf['path']))
+    cli_lpm = shlex.split('printf "conf t\n ip prefix-list fib_optimizer_lpm_v4 file:{}/fib_optimizer_lpm_v4"'.format(conf['path']))
+    cli_lem = shlex.split('printf "conf t\n ip prefix-list fib_optimizer_lem_v4 file:{}/fib_optimizer_lem_v4"'.format(conf['path']))
     cli = shlex.split('sudo ip netns exec default FastCli -p 15 -A')
 
     p_lpm = subprocess.Popen(cli_lpm, stdout=subprocess.PIPE)
@@ -197,8 +199,8 @@ def merge_pl():
                 i += 1
             return new
 
-    lem = _merge_pl(lem_prefixes, '{}/fib_optimizer_lem'.format(conf['path']), conf['max_lem_prefixes'])
-    lpm = _merge_pl(lpm_prefixes, '{}/fib_optimizer_lpm'.format(conf['path']), conf['max_lpm_prefixes'])
+    lem = _merge_pl(lem_prefixes, '{}/fib_optimizer_lem_v4'.format(conf['path']), conf['max_lem_prefixes'])
+    lpm = _merge_pl(lpm_prefixes, '{}/fib_optimizer_lpm_v4'.format(conf['path']), conf['max_lpm_prefixes'])
 
     return lem, lpm
 
