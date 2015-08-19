@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-# TODO metrics!!!
-# TODO when we have metrics stop the run if there is no new data since the last run
 
 from pySIR.pySIR import pySIR
 
@@ -73,6 +71,8 @@ def complete_prefix_list():
     return lem_pl, lpm_pl
 
 '''
+
+
 def get_variables():
     logger.debug('Getting variables from SIR')
     v = sir.get_variables_by_category_and_name('apps', 'fib_optimizer').result[0]
@@ -148,8 +148,10 @@ def build_prefix_lists():
 def install_prefix_lists():
     logger.debug('Installing the prefix-lists in the system')
 
-    cli_lpm = shlex.split('printf "conf t\n ip prefix-list fib_optimizer_lpm_v4 file:{}/fib_optimizer_lpm_v4"'.format(conf['path']))
-    cli_lem = shlex.split('printf "conf t\n ip prefix-list fib_optimizer_lem_v4 file:{}/fib_optimizer_lem_v4"'.format(conf['path']))
+    cli_lpm = shlex.split('printf "conf t\n ip prefix-list fib_optimizer_lpm_v4 file:{}/fib_optimizer_lpm_v4"'.format(
+                                                                                                        conf['path']))
+    cli_lem = shlex.split('printf "conf t\n ip prefix-list fib_optimizer_lem_v4 file:{}/fib_optimizer_lem_v4"'.format(
+                                                                                                        conf['path']))
     cli = shlex.split('sudo ip netns exec default FastCli -p 15 -A')
 
     p_lpm = subprocess.Popen(cli_lpm, stdout=subprocess.PIPE)
@@ -174,7 +176,8 @@ def merge_pl():
                     original_pl[prefix.rstrip()] = int(seq)
 
             if len(original_pl)*0.75 > len(pl):
-                msg = 'New prefix list ({}) is more than 25\% smaller than the new one ({})'.format(len(original_pl), len(pl))
+                msg = 'New prefix list ({}) is more than 25\% smaller than the new one ({})'.format(
+                                                                                            len(original_pl), len(pl))
                 logger.error(msg)
                 raise Exception(msg)
 
@@ -205,6 +208,16 @@ def merge_pl():
     return lem, lpm
 
 
+def purge_old_data():
+    logger.debug('Purging old data')
+    date = datetime.datetime.now() - datetime.timedelta(hours=conf['purge_older_than'])
+    date_text = date.strftime('%Y-%m-%dT%H:%M:%S')
+    logger.debug('Deleting BGP data older than: {}'.format(date_text))
+    sir.purge_bgp(older_than=date_text)
+    logger.debug('Deleting flow data older than: {}'.format(date_text))
+    sir.purge_flows(older_than=date_text)
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print 'You have to specify the base URL. For example: {} http://127.0.0.1:5000'.format(sys.argv[0])
@@ -232,4 +245,5 @@ if __name__ == "__main__":
     # We build the files with the prefix lists
     build_prefix_lists()
     install_prefix_lists()
+    purge_old_data()
     logger.info('End fib_optimizer')

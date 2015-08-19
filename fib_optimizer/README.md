@@ -78,6 +78,7 @@ This application needs the following variables inside the SIR agent:
 * max_lpm_prefixes - How many LPM prefixes you want. I recommend 16000 for the Arista 7280.
 * path - Where do you want to store the prefix lists. Recommended '/tmp'.
 * age - How many hours you want to go back to compute the TopN prefixes. For example, if you set 168 you will compute the TopN prefixes for the last 7 days.
+* purge_older_than - BGP data and flows that are older than 'purge_older_than' (in hours) will be purged. Recommended; age*2. If set to 0, no data is purged ever.
 
 You can set the variables from the python shell doing the following:
 
@@ -91,6 +92,7 @@ You can set the variables from the python shell doing the following:
         'max_lpm_prefixes': 16000,
         'path': '/tmp/',
         'age': 168,
+        'purge_older_than': 336,
     }
     sir = pySIR(base_url, verify_ssl=False)
     sir.delete_variables_by_category_and_name(name='fib_optimizer', category='apps')
