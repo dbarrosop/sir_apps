@@ -14,8 +14,8 @@ From the EOS bash:
 
 That will create two files:
 
-* */tmp/fib_optimizer_lpm* - LPM prefixes
-* */tmp/fib_optimizer_lem* - LEM prefixes
+* */tmp/fib_optimizer_lpm_v4* - LPM prefixes
+* */tmp/fib_optimizer_lem_v4* - LEM prefixes
 
 More on LPM/LEM prefixes later. To use them you will need the following configuration (adapt for your particular setup):
 
