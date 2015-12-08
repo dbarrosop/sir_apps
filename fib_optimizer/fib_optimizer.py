@@ -1,16 +1,15 @@
 #!/usr/bin/env python
 
-
 from pySIR.pySIR import pySIR
 
-import sys
+import argparse
+import datetime
 import json
-
+import os
 import shlex
 import subprocess
-import os
+import sys
 import time
-import datetime
 
 import logging
 logger = logging.getLogger('fib_optimizer')
@@ -110,23 +109,21 @@ def get_top_prefixes():
     # limit_lem = int(conf['max_lem_prefixes']) - len(inc_lem) + len(exc_lem)
     limit_lem = int(conf['max_lem_prefixes'])
     lem = [p['key'] for p in sir.get_top_prefixes(
-            start_time=start_time,
-            end_time=end_time,
-            limit_prefixes=limit_lem,
-            net_masks=conf['lem_prefixes'],
-            filter_proto=4,
-        ).result]
+        start_time=start_time,
+        end_time=end_time,
+        limit_prefixes=limit_lem,
+        net_masks=conf['lem_prefixes'],
+        filter_proto=4,).result]
 
     # limit_lpm = int(conf['max_lpm_prefixes']) - len(inc_lpm) + len(exc_lpm)
     limit_lpm = int(conf['max_lpm_prefixes'])
     lpm = [p['key'] for p in sir.get_top_prefixes(
-            start_time=start_time,
-            end_time=end_time,
-            limit_prefixes=limit_lpm,
-            net_masks=conf['lem_prefixes'],
-            filter_proto=4,
-            exclude_net_masks=1,
-        ).result]
+        start_time=start_time,
+        end_time=end_time,
+        limit_prefixes=limit_lpm,
+        net_masks=conf['lem_prefixes'],
+        filter_proto=4,
+        exclude_net_masks=1,).result]
     return lem, lpm
 
 
@@ -136,7 +133,7 @@ def build_prefix_lists():
     def _build_pl(name, prefixes):
         pl = ''
         for s, p in prefixes.iteritems():
-            pl += '{} permit {}\n'.format(s, p)
+            pl += 'seq {} permit {}\n'.format(s, p)
 
         with open('{}/{}'.format(conf['path'], name), "w") as f:
             f.write(pl)
@@ -148,10 +145,10 @@ def build_prefix_lists():
 def install_prefix_lists():
     logger.debug('Installing the prefix-lists in the system')
 
-    cli_lpm = shlex.split('printf "conf t\n ip prefix-list fib_optimizer_lpm_v4 file:{}/fib_optimizer_lpm_v4"'.format(
-                                                                                                        conf['path']))
-    cli_lem = shlex.split('printf "conf t\n ip prefix-list fib_optimizer_lem_v4 file:{}/fib_optimizer_lem_v4"'.format(
-                                                                                                        conf['path']))
+    cli_lpm = shlex.split('printf "refresh ip prefix-list fib_optimizer_lpm_v4"'.format(
+        conf['path']))
+    cli_lem = shlex.split('printf "refresh ip prefix-list fib_optimizer_lem_v4"'.format(
+        conf['path']))
     cli = shlex.split('sudo ip netns exec default FastCli -p 15 -A')
 
     p_lpm = subprocess.Popen(cli_lpm, stdout=subprocess.PIPE)
@@ -172,12 +169,12 @@ def merge_pl():
             with open(pl_file, 'r') as f:
                 original_pl = dict()
                 for line in f.readlines():
-                    seq, permit, prefix = line.split(' ')
+                    _, seq, permit, prefix = line.split(' ')
                     original_pl[prefix.rstrip()] = int(seq)
 
-            if len(original_pl)*0.75 > len(pl):
-                msg = 'New prefix list ({}) is more than 25\% smaller than the new one ({})'.format(
-                                                                                            len(original_pl), len(pl))
+            if len(original_pl) * 0.75 > len(pl):
+                msg = 'New prefix list ({}) is more than 25%% smaller than the new one ({})'.format(len(original_pl),
+                                                                                                    len(pl))
                 logger.error(msg)
                 raise Exception(msg)
 
@@ -188,7 +185,7 @@ def merge_pl():
             for p in existing_prefixes:
                 new_pl[original_pl[p]] = p
 
-            empty_pos = sorted(list(set(xrange(1, int(max_p)+1)) - set(original_pl.values())))
+            empty_pos = sorted(list(set(xrange(1, int(max_p) + 1)) - set(original_pl.values())))
             for p in new_prefixes:
                 new_pl[empty_pos.pop(0)] = p
 
