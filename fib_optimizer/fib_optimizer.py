@@ -133,6 +133,9 @@ def build_prefix_lists():
     def _build_pl(name, prefixes):
         pl = ''
         for s, p in prefixes.iteritems():
+            prefix, mask = p.split('/')
+            if mask == '32' or (prefix == '' and mask == '0'):
+                continue
             pl += 'seq {} permit {}\n'.format(s, p)
 
         with open('{}/{}'.format(conf['path'], name), "w") as f:
